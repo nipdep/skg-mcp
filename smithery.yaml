@@ -1,0 +1,15 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+    default: {}
+  commandFunction: |-
+    (config) => ({
+      command: 'uv',
+      args: ['run', 'src/server.py'],
+      env: {}
+    })
+  exampleConfig: {}

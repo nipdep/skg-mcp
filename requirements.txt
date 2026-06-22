@@ -1,0 +1,5 @@
+mcp[cli]>=1.4.1
+pydantic>=2.7.0
+httpx>=0.28.1
+pymilvus>=2.5.0
+openai>=1.0.0

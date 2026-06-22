@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.GS_Store
+
+# ignore temp dirs 
+temp/
+
+# ignore llm cache
+llm_cache/
+CLAUDE.md
+
+# ignore env files 
+.env
+
+
