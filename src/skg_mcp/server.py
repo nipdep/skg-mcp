@@ -13,8 +13,8 @@ from .models import (
     ExpandNeighborsResult,
     FilterPapersArgs,
     FilterPapersResult,
-    GetAttibutionArgs,
-    GetAttibutionResult,
+    GetAttributionArgs,
+    GetAttributionResult,
     GetProvenanceArgs,
     GetProvenanceResult,
     LexicalSearchArgs,
@@ -117,16 +117,16 @@ def create_mcp_server(backend: ScholarlyKnowledgeGraphBackend | None = None) -> 
         )
 
     @mcp.tool(
-        name="get_attibution",
-        description="Return attribution metadata for a given node.",
+        name="get_attribution",
+        description="Return the source paper and precise document location (section, paragraph, sentence) for a given node.",
         structured_output=True,
     )
-    async def get_attibution(args: GetAttibutionArgs) -> GetAttibutionResult:
+    async def get_attribution(args: GetAttributionArgs) -> GetAttributionResult:
         return await _invoke_backend(
             backend,
-            "get_attibution",
+            "get_attribution",
             args,
-            GetAttibutionResult,
+            GetAttributionResult,
         )
 
     @mcp.tool(

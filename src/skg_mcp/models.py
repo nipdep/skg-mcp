@@ -106,13 +106,7 @@ class PaperRef(BaseModel):
 
 class ProvenanceRef(BaseModel):
     paper_id: ID
-    section_id: Optional[ID] = None
-    section_title: Optional[str] = None
-    paragraph_id: Optional[ID] = None
     sentence_id: Optional[ID] = None
-    start_char: Optional[int] = None
-    end_char: Optional[int] = None
-    exact_text: Optional[str] = None
 
 
 class ConceptResult(BaseModel):
@@ -237,12 +231,10 @@ class ExpandContextArgs(BaseModel):
     node_id: ID
     node_kind: NodeKind
     paper_id: Optional[ID] = None
-    include_linked_nodes: bool = True
-    include_neighbor_nodes: bool = True
-    include_document_context: bool = True
-    include_paper_usage: bool = True
-    max_linked_nodes: int = Field(default=8, ge=1, le=100)
-    max_neighbor_nodes: int = Field(default=8, ge=1, le=100)
+    include_artifacts: bool = True
+    include_propositions: bool = True
+    include_relations: bool = True
+    limit: int = Field(default=20, ge=1, le=100)
 
 
 class ExpandNeighborsArgs(BaseModel):
@@ -255,18 +247,16 @@ class ExpandNeighborsArgs(BaseModel):
     include_node_kinds: Optional[List[NodeKind]] = None
 
 
-class GetAttibutionArgs(BaseModel):
-    node_id: ID
+class GetAttributionArgs(BaseModel):
+    node_ids: List[ID]
     node_kind: NodeKind
     paper_id: Optional[ID] = None
-    max_items: int = Field(default=10, ge=1, le=100)
 
 
 class GetProvenanceArgs(BaseModel):
-    node_id: ID
+    node_ids: List[ID]
     node_kind: NodeKind
     paper_id: Optional[ID] = None
-    max_items: int = Field(default=10, ge=1, le=200)
 
 
 # Response models
@@ -297,12 +287,19 @@ class PaperUsageItem(BaseModel):
     usage_summary: Optional[str] = None
 
 
+class ContextNode(BaseModel):
+    id: ID
+    kind: NodeKind
+    label: Optional[str] = None
+    node_type: Optional[str] = None
+    paper_id: Optional[ID] = None
+    relation: Optional[str] = None
+
+
 class ExpandContextResult(BaseModel):
     node: NodeRef
-    linked_nodes: Optional[List[NodeRef]] = None
-    neighbor_nodes: Optional[List[NodeRef]] = None
-    paper_usage: Optional[List[PaperUsageItem]] = None
-    document_context: Optional[DocumentContext] = None
+    artifacts: Optional[List[ContextNode]] = None
+    propositions: Optional[List[ContextNode]] = None
 
 
 class DocumentContext(BaseModel):
@@ -325,11 +322,28 @@ class AttributionItem(BaseModel):
     confidence: Optional[float] = None
 
 
-class GetAttibutionResult(BaseModel):
-    node: NodeRef
-    attributions: List[AttributionItem]
+class DocumentLocation(BaseModel):
+    section_id: Optional[ID] = None
+    section_title: Optional[str] = None
+    paragraph_id: Optional[ID] = None
+    sentence_id: Optional[ID] = None
+    sentence_text: Optional[str] = None
+
+
+class NodeAttribution(BaseModel):
+    node_id: ID
+    paper: Optional[PaperRef] = None
+    location: Optional[DocumentLocation] = None
+
+
+class GetAttributionResult(BaseModel):
+    attributions: List[NodeAttribution]
+
+
+class NodeProvenance(BaseModel):
+    node_id: ID
+    provenance: List[ProvenanceRef]
 
 
 class GetProvenanceResult(BaseModel):
-    node: NodeRef
-    provenance: List[ProvenanceRef]
+    provenance: List[NodeProvenance]

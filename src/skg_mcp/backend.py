@@ -9,8 +9,8 @@ from .models import (
     ExpandNeighborsResult,
     FilterPapersArgs,
     FilterPapersResult,
-    GetAttibutionArgs,
-    GetAttibutionResult,
+    GetAttributionArgs,
+    GetAttributionResult,
     GetProvenanceArgs,
     GetProvenanceResult,
     LexicalSearchArgs,
@@ -62,8 +62,8 @@ class ScholarlyKnowledgeGraphBackend(ABC):
         """Traverse neighbors from any node type with configurable hop count."""
 
     @abstractmethod
-    async def get_attibution(self, args: GetAttibutionArgs) -> GetAttibutionResult:
-        """Return attribution metadata for a node."""
+    async def get_attribution(self, args: GetAttributionArgs) -> GetAttributionResult:
+        """Return paper and precise document location for a node."""
 
     @abstractmethod
     async def get_provenance(self, args: GetProvenanceArgs) -> GetProvenanceResult:
@@ -103,8 +103,8 @@ class NotImplementedBackend(ScholarlyKnowledgeGraphBackend):
     async def expand_neighbors(self, args: ExpandNeighborsArgs) -> ExpandNeighborsResult:
         await self._not_implemented("expand_neighbors")
 
-    async def get_attibution(self, args: GetAttibutionArgs) -> GetAttibutionResult:
-        await self._not_implemented("get_attibution")
+    async def get_attribution(self, args: GetAttributionArgs) -> GetAttributionResult:
+        await self._not_implemented("get_attribution")
 
     async def get_provenance(self, args: GetProvenanceArgs) -> GetProvenanceResult:
         await self._not_implemented("get_provenance")

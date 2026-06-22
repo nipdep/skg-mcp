@@ -25,25 +25,26 @@ except Exception:  # pragma: no cover - import-path compatibility
 
 from .backend import ScholarlyKnowledgeGraphBackend
 from .models import (
-    AttributionItem,
     ConceptResult,
-    DocumentContext,
+    ContextNode,
+    DocumentLocation,
     ExpandContextArgs,
     ExpandContextResult,
     ExpandNeighborsArgs,
     ExpandNeighborsResult,
     FilterPapersArgs,
     FilterPapersResult,
-    GetAttibutionArgs,
-    GetAttibutionResult,
+    GetAttributionArgs,
+    GetAttributionResult,
     GetProvenanceArgs,
     GetProvenanceResult,
     LexicalSearchArgs,
     NeighborResult,
+    NodeAttribution,
+    NodeProvenance,
     NodeRef,
     NodeKind,
     PaperRef,
-    PaperUsageItem,
     ProvenanceRef,
     Resolution,
     ResolveConceptReferenceArgs,
@@ -242,14 +243,10 @@ class LLMMockBackend(ScholarlyKnowledgeGraphBackend):
         )
 
     @staticmethod
-    def _make_provenance(paper_id: str, exact_text: str) -> ProvenanceRef:
+    def _make_provenance(paper_id: str) -> ProvenanceRef:
         return ProvenanceRef(
             paper_id=paper_id,
-            section_title="Mock Section",
             sentence_id=f"{paper_id}-s1",
-            start_char=10,
-            end_char=10 + len(exact_text),
-            exact_text=exact_text,
         )
 
     @staticmethod
@@ -460,61 +457,33 @@ class LLMMockBackend(ScholarlyKnowledgeGraphBackend):
                 score=0.82,
             )
 
-            linked_nodes = None
-            if args.include_linked_nodes:
-                linked_nodes = [
-                    self._make_node_ref(
-                        node_id="ctx-linked-1",
-                        node_kind=NodeKind.CONCEPT if args.node_kind == NodeKind.STATEMENT else NodeKind.STATEMENT,
-                        label="linked-node-1",
+            artifacts = None
+            if args.include_artifacts:
+                artifacts = [
+                    ContextNode(
+                        id="ctx-artifact-1",
+                        kind=NodeKind.CONCEPT,
+                        label="mock-artifact-1",
+                        node_type="Artifact",
                         paper_id=args.paper_id,
-                        score=0.81,
+                        relation="mentions" if args.include_relations else None,
                     )
-                ][: args.max_linked_nodes]
+                ][: args.limit]
 
-            neighbor_nodes = None
-            if args.include_neighbor_nodes:
-                neighbor_nodes = [
-                    self._make_node_ref(
-                        node_id="ctx-neighbor-1",
-                        node_kind=NodeKind.CONCEPT,
-                        label="neighbor-concept-1",
+            propositions = None
+            if args.include_propositions:
+                propositions = [
+                    ContextNode(
+                        id="ctx-proposition-1",
+                        kind=NodeKind.STATEMENT,
+                        label="Mock proposition text.",
+                        node_type="Argument",
                         paper_id=args.paper_id,
-                        score=0.79,
-                    ),
-                    self._make_node_ref(
-                        node_id="ctx-neighbor-2",
-                        node_kind=NodeKind.STATEMENT,
-                        label="neighbor-statement-1",
-                        paper_id=args.paper_id,
-                        score=0.76,
-                    ),
-                ][: args.max_neighbor_nodes]
-
-            paper_usage = None
-            if args.include_paper_usage:
-                paper_usage = [
-                    PaperUsageItem(
-                        paper=self._make_paper_ref(args.paper_id or "p-mock-1", "Mock Context Paper"),
-                        usage_summary=f"Context usage summary for node {args.node_id}.",
+                        relation="supports" if args.include_relations else None,
                     )
-                ]
+                ][: args.limit]
 
-            document_context = None
-            if args.include_document_context:
-                document_context = DocumentContext(
-                    preceding_text="Synthetic preceding context.",
-                    following_text="Synthetic following context.",
-                    section_title="Mock Section",
-                )
-
-            return ExpandContextResult(
-                node=node,
-                linked_nodes=linked_nodes,
-                neighbor_nodes=neighbor_nodes,
-                paper_usage=paper_usage,
-                document_context=document_context,
-            )
+            return ExpandContextResult(node=node, artifacts=artifacts, propositions=propositions)
 
         return await self._invoke_with_llm(
             operation="expand_context",
@@ -580,44 +549,43 @@ class LLMMockBackend(ScholarlyKnowledgeGraphBackend):
             fallback=fallback,
         )
 
-    async def get_attibution(self, args: GetAttibutionArgs) -> GetAttibutionResult:
-        def fallback() -> GetAttibutionResult:
-            node = self._make_node_ref(
-                node_id=args.node_id,
-                node_kind=args.node_kind,
-                label=f"{args.node_kind.value}-{args.node_id}",
-                paper_id=args.paper_id,
-            )
+    async def get_attribution(self, args: GetAttributionArgs) -> GetAttributionResult:
+        def fallback() -> GetAttributionResult:
+            paper = self._make_paper_ref(args.paper_id or "p-mock-1", "Mock Attribution Paper")
             attributions = [
-                AttributionItem(
-                    source_paper=self._make_paper_ref(args.paper_id or "p-mock-1", "Mock Attribution Paper"),
-                    source_author="Mock Author",
-                    attribution_type="citation",
-                    statement=f"Node {args.node_id} attributed in synthetic citation graph.",
-                    confidence=0.86,
+                NodeAttribution(
+                    node_id=nid,
+                    paper=paper,
+                    location=DocumentLocation(
+                        section_id="sec-mock-1",
+                        section_title="Mock Section",
+                        paragraph_id="para-mock-1",
+                        sentence_id="sent-mock-1",
+                        sentence_text=f"Node {nid} appears in this synthetic sentence.",
+                    ),
                 )
-            ][: args.max_items]
-            return GetAttibutionResult(node=node, attributions=attributions)
+                for nid in args.node_ids
+            ]
+            return GetAttributionResult(attributions=attributions)
 
         return await self._invoke_with_llm(
-            operation="get_attibution",
+            operation="get_attribution",
             args=args,
-            result_model=GetAttibutionResult,
+            result_model=GetAttributionResult,
             fallback=fallback,
         )
 
     async def get_provenance(self, args: GetProvenanceArgs) -> GetProvenanceResult:
         def fallback() -> GetProvenanceResult:
-            node = self._make_node_ref(
-                node_id=args.node_id,
-                node_kind=args.node_kind,
-                label=f"{args.node_kind.value}-{args.node_id}",
-                paper_id=args.paper_id,
+            return GetProvenanceResult(
+                provenance=[
+                    NodeProvenance(
+                        node_id=nid,
+                        provenance=[self._make_provenance(args.paper_id or "p-mock-1")],
+                    )
+                    for nid in args.node_ids
+                ]
             )
-            provenance = [
-                self._make_provenance(args.paper_id or "p-mock-1", args.node_id),
-            ][: args.max_items]
-            return GetProvenanceResult(node=node, provenance=provenance)
 
         return await self._invoke_with_llm(
             operation="get_provenance",
