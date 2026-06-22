@@ -20,18 +20,20 @@ except Exception:  # pragma: no cover - import-path compatibility
 
 from .backend import ScholarlyKnowledgeGraphBackend
 from .models import (
-    AttributionItem,
     ConceptFilter,
     ConceptResult,
-    DocumentContext,
+    ContextNode,
+    DocumentLocation,
+    NodeAttribution,
+    NodeProvenance,
     ExpandContextArgs,
     ExpandContextResult,
     ExpandNeighborsArgs,
     ExpandNeighborsResult,
     FilterPapersArgs,
     FilterPapersResult,
-    GetAttibutionArgs,
-    GetAttibutionResult,
+    GetAttributionArgs,
+    GetAttributionResult,
     GetProvenanceArgs,
     GetProvenanceResult,
     LexicalSearchArgs,
@@ -40,7 +42,6 @@ from .models import (
     NodeRef,
     PaperFilter,
     PaperRef,
-    PaperUsageItem,
     ProvenanceRef,
     Resolution,
     ResolveConceptReferenceArgs,
@@ -65,13 +66,13 @@ PREFIX prov: <http://www.w3.org/ns/prov#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-PREFIX sudo: <https://purl.org/twc/sudo/ontology#>
+PREFIX sudo: <https://w3id.org/twc/sudo/ontology#>
 """
 
-KG_CONCEPT_BASE = "https://purl.org/twc/sudo/kg/concept/"
-KG_PROPOSITION_BASE = "https://purl.org/twc/sudo/kg/proposition/"
-PAPER_BASE = "http://purl.org/sudo/kg/paper/"
-SENTENCE_BASE = "http://purl.org/sudo/kg/sentence/"
+KG_CONCEPT_BASE = "https://w3id.org/twc/sudo/kg/concept/"
+KG_PROPOSITION_BASE = "https://w3id.org/twc/sudo/kg/proposition/"
+PAPER_BASE = "https://w3id.org/twc/sudo/kg/paper/"
+SENTENCE_BASE = "https://w3id.org/twc/sudo/kg/sentence/"
 
 SUDO_META_TYPES = {"Artifact", "Argument", "Descriptor"}
 
@@ -328,7 +329,7 @@ class SudoKGBackend(ScholarlyKnowledgeGraphBackend):
             iris = self._terms([self._paper_iri(pid) for pid in filters.paper_ids])
             chunks.append(f"GRAPH {self._graph('prov')} {{ ?node prov:hadPrimarySource ?paper . FILTER(?paper IN ({iris})) }}")
         if filters.concept_types:
-            type_iris = self._terms([f"https://purl.org/twc/sudo/ontology#{t}" for t in filters.concept_types])
+            type_iris = self._terms([f"https://w3id.org/twc/sudo/ontology#{t}" for t in filters.concept_types])
             chunks.append(f"GRAPH {self._graph('sudo')} {{ ?node a ?type . FILTER(?type IN ({type_iris})) }}")
         if filters.canonical_only:
             chunks.append(f"GRAPH {self._graph('concept')} {{ ?node a ?type . }}")
@@ -345,10 +346,10 @@ class SudoKGBackend(ScholarlyKnowledgeGraphBackend):
             iris = self._terms([self._paper_iri(pid) for pid in filters.paper_ids])
             chunks.append(f"GRAPH {self._graph('prov')} {{ ?node prov:hadPrimarySource ?paper . FILTER(?paper IN ({iris})) }}")
         if filters.statement_types:
-            type_iris = self._terms([f"https://purl.org/twc/sudo/ontology#{t}" for t in filters.statement_types])
+            type_iris = self._terms([f"https://w3id.org/twc/sudo/ontology#{t}" for t in filters.statement_types])
             chunks.append(f"GRAPH {self._graph('sudo')} {{ ?node a ?type . FILTER(?type IN ({type_iris})) }}")
         if filters.rhetorical_roles:
-            type_iris = self._terms([f"https://purl.org/twc/sudo/ontology#{t}" for t in filters.rhetorical_roles])
+            type_iris = self._terms([f"https://w3id.org/twc/sudo/ontology#{t}" for t in filters.rhetorical_roles])
             chunks.append(f"GRAPH {self._graph('sudo')} {{ ?node a ?role . FILTER(?role IN ({type_iris})) }}")
         chunks.append(self._render_sparql_filters(filters.sparql_filters, default_graph="sudo"))
         return "\n".join(chunk for chunk in chunks if chunk)
@@ -384,7 +385,7 @@ SELECT ?id ?score ?node ?label ?type ?paper WHERE {{
   OPTIONAL {{
     GRAPH {self._graph('sudo')} {{
       ?node a ?type .
-      FILTER(STRSTARTS(STR(?type), "https://purl.org/twc/sudo/ontology#"))
+      FILTER(STRSTARTS(STR(?type), "https://w3id.org/twc/sudo/ontology#"))
     }}
   }}
   OPTIONAL {{ GRAPH {self._graph('prov')} {{ ?node prov:hadPrimarySource ?paper . }} }}
@@ -392,7 +393,18 @@ SELECT ?id ?score ?node ?label ?type ?paper WHERE {{
 }}
 """
         rows = await self._sparql(query)
-        by_id = {self._binding(row, "id"): row for row in rows}
+        by_id: dict[str, Any] = {}
+        for row in rows:
+            rid = self._binding(row, "id")
+            if rid is None:
+                continue
+            if rid not in by_id:
+                by_id[rid] = row
+            else:
+                existing_type = self._local_name(self._binding(by_id[rid], "type")) or ""
+                new_type = self._local_name(self._binding(row, "type")) or ""
+                if existing_type in SUDO_META_TYPES and new_type not in SUDO_META_TYPES:
+                    by_id[rid] = row
         hydrated: list[dict[str, Any]] = []
         for hit in hits:
             row = by_id.get(hit.id, {})
@@ -510,16 +522,24 @@ SELECT ?node ?label ?type ?paper WHERE {{
 LIMIT {limit}
 """
         rows = await self._sparql(query)
-        return [
-            {
+        seen: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item = {
                 "id": self._local_name(self._binding(row, "node")) or "",
                 "label": self._binding(row, "label") or "",
                 "type": self._local_name(self._binding(row, "type")),
                 "paper_id": self._local_name(self._binding(row, "paper")),
                 "score": None,
             }
-            for row in rows
-        ]
+            nid = item["id"]
+            if nid not in seen:
+                seen[nid] = item
+            else:
+                existing_type = seen[nid].get("type") or ""
+                new_type = item.get("type") or ""
+                if existing_type in SUDO_META_TYPES and new_type not in SUDO_META_TYPES:
+                    seen[nid] = item
+        return list(seen.values())
 
     @staticmethod
     def _concept_result(row: dict[str, Any]) -> ConceptResult:
@@ -688,40 +708,76 @@ LIMIT 1
 
     async def expand_context(self, args: ExpandContextArgs) -> ExpandContextResult:
         node = await self._node_ref(args.node_id, args.node_kind, args.paper_id)
-        neighbor_result = await self.expand_neighbors(
-            ExpandNeighborsArgs(
-                node_id=args.node_id,
-                node_kind=args.node_kind,
-                paper_id=args.paper_id,
-                hop_count=1,
-                limit=args.max_neighbor_nodes,
+
+        if not args.include_artifacts and not args.include_propositions:
+            return ExpandContextResult(node=node)
+
+        iri = self._node_iri(args.node_id, args.node_kind)
+
+        type_filter_parts: list[str] = []
+        if args.include_artifacts:
+            type_filter_parts.append("?targetType = sudo:Artifact")
+        if args.include_propositions:
+            type_filter_parts.append(f'STRSTARTS(STR(?target), "{KG_PROPOSITION_BASE}")')
+        type_filter = "FILTER(" + " || ".join(type_filter_parts) + ")"
+
+        query = f"""
+{PREFIXES}
+SELECT ?relLocal ?target ?targetLabel ?targetType ?targetPaper WHERE {{
+  GRAPH {self._graph('sudo')} {{
+    {{
+      <{iri}> ?rel ?target .
+    }} UNION {{
+      ?target ?rel <{iri}> .
+    }}
+    ?target a ?targetType .
+    FILTER(?rel NOT IN (rdf:type, rdfs:label))
+    {type_filter}
+    OPTIONAL {{ ?target rdfs:label ?targetLabel . }}
+    BIND(REPLACE(STR(?rel), "^.*[/#]", "") AS ?relLocal)
+  }}
+  OPTIONAL {{ GRAPH {self._graph('prov')} {{ ?target prov:hadPrimarySource ?targetPaper . }} }}
+}}
+LIMIT {args.limit}
+"""
+        rows = await self._sparql(query)
+
+        seen: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            target_iri = self._binding(row, "target")
+            if not target_iri:
+                continue
+            if target_iri not in seen:
+                seen[target_iri] = row
+            else:
+                existing_type = self._local_name(self._binding(seen[target_iri], "targetType")) or ""
+                new_type = self._local_name(self._binding(row, "targetType")) or ""
+                if existing_type in SUDO_META_TYPES and new_type not in SUDO_META_TYPES:
+                    seen[target_iri] = row
+
+        artifacts: list[ContextNode] = []
+        propositions: list[ContextNode] = []
+        for target_iri, row in seen.items():
+            target_id = self._local_name(target_iri) or ""
+            is_proposition = KG_PROPOSITION_BASE in target_iri
+            kind = NodeKind.STATEMENT if is_proposition else NodeKind.CONCEPT
+            ctx_node = ContextNode(
+                id=target_id,
+                kind=kind,
+                label=self._binding(row, "targetLabel"),
+                node_type=self._local_name(self._binding(row, "targetType")),
+                paper_id=self._local_name(self._binding(row, "targetPaper")) or args.paper_id,
+                relation=self._binding(row, "relLocal") if args.include_relations else None,
             )
-        )
-        neighbor_nodes = [
-            NodeRef(id=n.target_id, kind=n.target_kind, label=n.target_label, paper_id=args.paper_id, score=n.score)
-            for n in neighbor_result.neighbors
-        ] if args.include_neighbor_nodes else None
-
-        paper_usage = None
-        if args.include_paper_usage:
-            prov = await self.get_provenance(GetProvenanceArgs(node_id=args.node_id, node_kind=args.node_kind, paper_id=args.paper_id))
-            paper_usage = [
-                PaperUsageItem(paper=PaperRef(id=item.paper_id, title=item.paper_id), usage_summary=item.exact_text)
-                for item in prov.provenance[: args.max_linked_nodes]
-            ]
-
-        document_context = None
-        if args.include_document_context:
-            prov = await self.get_provenance(GetProvenanceArgs(node_id=args.node_id, node_kind=args.node_kind, paper_id=args.paper_id, max_items=1))
-            first = prov.provenance[0] if prov.provenance else None
-            document_context = DocumentContext(section_title=first.section_title if first else None)
+            if is_proposition:
+                propositions.append(ctx_node)
+            else:
+                artifacts.append(ctx_node)
 
         return ExpandContextResult(
             node=node,
-            linked_nodes=neighbor_nodes[: args.max_linked_nodes] if args.include_linked_nodes and neighbor_nodes else None,
-            neighbor_nodes=neighbor_nodes,
-            paper_usage=paper_usage,
-            document_context=document_context,
+            artifacts=artifacts if args.include_artifacts else None,
+            propositions=propositions if args.include_propositions else None,
         )
 
     async def expand_neighbors(self, args: ExpandNeighborsArgs) -> ExpandNeighborsResult:
@@ -765,54 +821,115 @@ LIMIT {args.limit}
             neighbors.append(item)
         return ExpandNeighborsResult(source_node=source, hop_count=args.hop_count, neighbors=neighbors)
 
-    async def get_attibution(self, args: GetAttibutionArgs) -> GetAttibutionResult:
-        node = await self._node_ref(args.node_id, args.node_kind, args.paper_id)
-        prov = await self.get_provenance(GetProvenanceArgs(node_id=args.node_id, node_kind=args.node_kind, paper_id=args.paper_id, max_items=args.max_items))
-        attributions = [
-            AttributionItem(
-                source_paper=PaperRef(id=item.paper_id, title=item.paper_id),
-                attribution_type="primary_source",
-                statement=item.exact_text,
-                confidence=1.0,
-            )
-            for item in prov.provenance
-        ]
-        return GetAttibutionResult(node=node, attributions=attributions)
-
-    async def get_provenance(self, args: GetProvenanceArgs) -> GetProvenanceResult:
-        node = await self._node_ref(args.node_id, args.node_kind, args.paper_id)
-        iri = self._node_iri(args.node_id, args.node_kind)
+    async def get_attribution(self, args: GetAttributionArgs) -> GetAttributionResult:
+        values = " ".join(
+            f"(<{self._node_iri(nid, args.node_kind)}> {self._literal(nid)})"
+            for nid in args.node_ids
+        )
         paper_filter = ""
         if args.paper_id:
             paper_filter = f"FILTER(?paper = <{self._paper_iri(args.paper_id)}>)"
         query = f"""
 {PREFIXES}
-SELECT ?paper ?sentence ?sectionTitle ?exactText WHERE {{
+SELECT ?nodeId ?paper ?paperTitle ?sentence ?sentenceText ?parent ?grandparent ?sectionTitle WHERE {{
+  VALUES (?node ?nodeId) {{ {values} }}
   GRAPH {self._graph('prov')} {{
-    <{iri}> prov:hadPrimarySource ?paper .
-    OPTIONAL {{ <{iri}> prov:wasDerivedFrom ?sentence . }}
+    ?node prov:hadPrimarySource ?paper .
+    OPTIONAL {{ ?node prov:wasDerivedFrom ?sentence . }}
     {paper_filter}
   }}
-  OPTIONAL {{ GRAPH {self._graph('sudo')} {{ <{iri}> rdfs:label ?exactText . }} }}
+  OPTIONAL {{ GRAPH {self._graph('meta')} {{ ?paper dct:title ?paperTitle . }} }}
   OPTIONAL {{
     GRAPH {self._graph('struct')} {{
-      ?paragraph po:contains ?sentence .
-      ?section po:contains ?paragraph ;
-               po:containsAsHeader ?sectionTitleNode .
-      ?sectionTitleNode rdf:value ?sectionTitle .
+      ?parent po:contains ?sentence .
+      OPTIONAL {{ ?sentence rdf:value ?sentenceText . }}
+      OPTIONAL {{
+        ?grandparent po:contains ?parent .
+        OPTIONAL {{
+          ?grandparent po:containsAsHeader ?sectionHeader .
+          ?sectionHeader rdf:value ?sectionTitle .
+        }}
+      }}
     }}
   }}
 }}
-LIMIT {args.max_items}
 """
         rows = await self._sparql(query)
-        provenance = [
-            ProvenanceRef(
-                paper_id=self._local_name(self._binding(row, "paper")) or "",
-                section_title=self._binding(row, "sectionTitle"),
-                sentence_id=self._local_name(self._binding(row, "sentence")),
-                exact_text=self._binding(row, "exactText"),
-            )
-            for row in rows
-        ]
-        return GetProvenanceResult(node=node, provenance=provenance)
+
+        by_node: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            nid = self._binding(row, "nodeId")
+            if nid and nid not in by_node:
+                by_node[nid] = row
+
+        attributions: list[NodeAttribution] = []
+        for nid in args.node_ids:
+            row = by_node.get(nid, {})
+            paper = None
+            paper_iri = self._binding(row, "paper")
+            if paper_iri:
+                paper = PaperRef(
+                    id=self._local_name(paper_iri) or paper_iri,
+                    title=self._binding(row, "paperTitle") or self._local_name(paper_iri) or paper_iri,
+                )
+            location = None
+            sentence_iri = self._binding(row, "sentence")
+            if sentence_iri:
+                parent_iri = self._binding(row, "parent")
+                grandparent_iri = self._binding(row, "grandparent")
+                if grandparent_iri:
+                    section_id = self._local_name(grandparent_iri)
+                    paragraph_id = self._local_name(parent_iri)
+                else:
+                    section_id = self._local_name(parent_iri)
+                    paragraph_id = None
+                location = DocumentLocation(
+                    section_id=section_id,
+                    section_title=self._binding(row, "sectionTitle"),
+                    paragraph_id=paragraph_id,
+                    sentence_id=self._local_name(sentence_iri),
+                    sentence_text=self._binding(row, "sentenceText"),
+                )
+            attributions.append(NodeAttribution(node_id=nid, paper=paper, location=location))
+
+        return GetAttributionResult(attributions=attributions)
+
+    async def get_provenance(self, args: GetProvenanceArgs) -> GetProvenanceResult:
+        values = " ".join(
+            f"(<{self._node_iri(nid, args.node_kind)}> {self._literal(nid)})"
+            for nid in args.node_ids
+        )
+        paper_filter = ""
+        if args.paper_id:
+            paper_filter = f"FILTER(?paper = <{self._paper_iri(args.paper_id)}>)"
+        query = f"""
+{PREFIXES}
+SELECT ?nodeId ?paper ?sentence WHERE {{
+  VALUES (?node ?nodeId) {{ {values} }}
+  GRAPH {self._graph('prov')} {{
+    ?node prov:hadPrimarySource ?paper .
+    OPTIONAL {{ ?node prov:wasDerivedFrom ?sentence . }}
+    {paper_filter}
+  }}
+}}
+"""
+        rows = await self._sparql(query)
+
+        by_node: dict[str, list[ProvenanceRef]] = {nid: [] for nid in args.node_ids}
+        for row in rows:
+            nid = self._binding(row, "nodeId")
+            paper_iri = self._binding(row, "paper")
+            if nid and nid in by_node and paper_iri:
+                by_node[nid].append(
+                    ProvenanceRef(
+                        paper_id=self._local_name(paper_iri) or paper_iri,
+                        sentence_id=self._local_name(self._binding(row, "sentence")),
+                    )
+                )
+
+        return GetProvenanceResult(
+            provenance=[
+                NodeProvenance(node_id=nid, provenance=refs)
+                for nid, refs in by_node.items()
+            ]
+        )
