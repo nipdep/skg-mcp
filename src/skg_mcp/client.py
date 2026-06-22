@@ -18,8 +18,8 @@ from .models import (
     ExpandNeighborsResult,
     FilterPapersArgs,
     FilterPapersResult,
-    GetAttibutionArgs,
-    GetAttibutionResult,
+    GetAttributionArgs,
+    GetAttributionResult,
     GetProvenanceArgs,
     GetProvenanceResult,
     LexicalSearchArgs,
@@ -49,7 +49,7 @@ class SKGMCPClient:
         "resolve_concept_reference": ("resolve_concept_reference",),
         "expand_context": ("expand_context",),
         "expand_neighbors": ("expand_neighbors",),
-        "get_attibution": ("get_attibution",),
+        "get_attribution": ("get_attribution",),
         "get_provenance": ("get_provenance",),
     }
 
@@ -265,11 +265,11 @@ class SKGMCPClient:
     ) -> ExpandNeighborsResult:
         return await self._call_typed_tool("expand_neighbors", args, ExpandNeighborsResult)
 
-    async def get_attibution(
+    async def get_attribution(
         self,
-        args: GetAttibutionArgs | Mapping[str, Any],
-    ) -> GetAttibutionResult:
-        return await self._call_typed_tool("get_attibution", args, GetAttibutionResult)
+        args: GetAttributionArgs | Mapping[str, Any],
+    ) -> GetAttributionResult:
+        return await self._call_typed_tool("get_attribution", args, GetAttributionResult)
 
     async def get_provenance(
         self,
